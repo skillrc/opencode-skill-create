@@ -1,27 +1,19 @@
 #!/bin/bash
-#
-# create-skill.sh - Interactive wizard for creating new OpenCode skills
-# 
-# Usage: ./create-skill.sh [skill-name]
-#
 
 set -e
 
-# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATE_DIR="$SCRIPT_DIR/templates"
 SKILLS_DEV_DIR="${OPENCODE_SKILLS_DEV_DIR:-$HOME/Project/Skills}"
 SKILL_PREFIX="opencode-skill-"
 MANIFEST_VERSION="1.0"
 
-# Print functions
 print_header() {
     echo -e "\n${BLUE}=== $1 ===${NC}\n"
 }
@@ -38,17 +30,14 @@ print_error() {
     echo -e "${RED}✗ $1${NC}" >&2
 }
 
-# Validate skill name
 validate_skill_name() {
     local name="$1"
-    
-    # Check if empty
+
     if [[ -z "$name" ]]; then
         print_error "Skill name cannot be empty"
         return 1
     fi
-    
-    # Check format: only lowercase letters, numbers, and hyphens
+
     if [[ ! "$name" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
         print_error "Invalid skill name: '$name'"
         echo "   Skill names must:"
@@ -58,22 +47,50 @@ validate_skill_name() {
         echo "   - Examples: git-workflow, code-review, session-journal"
         return 1
     fi
-    
-    # Check length (max 50 chars)
+
     if [[ ${#name} -gt 50 ]]; then
         print_error "Skill name too long (max 50 characters)"
         return 1
     fi
-    
+
     return 0
 }
 
-# Get skill name
+validate_command_namespace() {
+    local namespace="$1"
+
+    if [[ -z "$namespace" ]]; then
+        print_error "Command namespace cannot be empty"
+        return 1
+    fi
+
+    if [[ ! "$namespace" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+        print_error "Invalid command namespace: '$namespace'"
+        echo "   Command namespaces must use lowercase letters, numbers, and hyphens"
+        return 1
+    fi
+
+    if [[ ${#namespace} -gt 50 ]]; then
+        print_error "Command namespace too long (max 50 characters)"
+        return 1
+    fi
+
+    return 0
+}
+
+validate_data_dir_contract() {
+    local value="$1"
+    if [[ -z "$value" ]]; then
+        print_error "Data-dir contract cannot be empty"
+        return 1
+    fi
+    return 0
+}
+
 get_skill_name() {
     local name="$1"
-    
+
     if [[ -n "$name" ]]; then
-        # Remove prefix if provided
         name="${name#$SKILL_PREFIX}"
         if validate_skill_name "$name"; then
             echo "$name"
@@ -82,13 +99,12 @@ get_skill_name() {
             return 1
         fi
     fi
-    
-    # Interactive mode
+
     while true; do
         echo -n "Enter skill name (e.g., 'git-workflow'): " >&2
         read -r name
         name="${name#$SKILL_PREFIX}"
-        
+
         if validate_skill_name "$name"; then
             echo "$name"
             return 0
@@ -97,27 +113,42 @@ get_skill_name() {
     done
 }
 
-# Get skill description
 get_description() {
     echo -n "Enter skill description (Use when...): " >&2
     read -r description
-    
-    # Ensure it starts with "Use when"
+
     if [[ ! "$description" =~ ^[Uu]se[[:space:]]when ]]; then
         description="Use when $description"
     fi
-    
+
     echo "$description"
 }
 
-# Get skill type
+get_template_mode() {
+    echo "Select template mode:" >&2
+    echo "  1) skill-only        - Standard OpenCode skill scaffold" >&2
+    echo "  2) knowledge-hybrid  - Skill plus namespaced save/search/load knowledge commands" >&2
+
+    while true; do
+        echo -n "Choice (1-2, default 1): " >&2
+        read -r choice
+        choice="${choice:-1}"
+
+        case "$choice" in
+            1) echo "skill-only"; return 0 ;;
+            2) echo "knowledge-hybrid"; return 0 ;;
+            *) print_warning "Please enter 1-2" ;;
+        esac
+    done
+}
+
 get_skill_type() {
     echo "Select skill type:" >&2
     echo "  1) Technique - Concrete method with steps" >&2
     echo "  2) Pattern   - Way of thinking about problems" >&2
     echo "  3) Reference - API docs, syntax guides" >&2
     echo "  4) Discipline - Rules/requirements to follow" >&2
-    
+
     while true; do
         echo -n "Choice (1-4): " >&2
         read -r choice
@@ -167,7 +198,6 @@ get_category() {
 
 get_boundary() {
     local boundary
-
     echo -n "Enter skill boundary (one sentence describing what it covers): " >&2
     read -r boundary
 
@@ -193,7 +223,6 @@ get_metadata_list() {
 
 normalize_metadata_candidates() {
     local raw="$1"
-
     printf '%s' "$raw" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9 -]/ /g; s/[[:space:]]\+/-/g; s/-\{2,\}/-/g; s/^-//; s/-$//'
 }
 
@@ -221,9 +250,10 @@ build_tag_suggestions() {
     local category="$2"
     local description="$3"
     local boundary="$4"
+    local template_mode="$5"
     local combined normalized tags_csv token
 
-    combined="$skill_name $category $description $boundary"
+    combined="$skill_name $category $description $boundary $template_mode"
     normalized=$(normalize_metadata_candidates "$combined")
 
     tags_csv=""
@@ -234,31 +264,20 @@ build_tag_suggestions() {
         fi
     done
 
-    if printf '%s' "$combined" | grep -Eqi '\bgit\b'; then tags_csv=$(append_csv_item "$tags_csv" "git"); fi
-    if printf '%s' "$combined" | grep -Eqi '\bcommit(s)?\b'; then tags_csv=$(append_csv_item "$tags_csv" "commits"); fi
-    if printf '%s' "$combined" | grep -Eqi '\brepositor(y|ies)\b|\brepo\b'; then tags_csv=$(append_csv_item "$tags_csv" "repository"); fi
-    if printf '%s' "$combined" | grep -Eqi '\bhistor(y|ies)\b'; then tags_csv=$(append_csv_item "$tags_csv" "history"); fi
-    if printf '%s' "$combined" | grep -Eqi '\bcleanup\b|\bclean-up\b|\bclean up\b'; then tags_csv=$(append_csv_item "$tags_csv" "cleanup"); fi
-    if printf '%s' "$combined" | grep -Eqi '\bhygiene\b'; then tags_csv=$(append_csv_item "$tags_csv" "hygiene"); fi
     if printf '%s' "$combined" | grep -Eqi '\bworkflow\b'; then tags_csv=$(append_csv_item "$tags_csv" "workflow"); fi
-    if printf '%s' "$combined" | grep -Eqi '\bboundar(y|ies)\b'; then tags_csv=$(append_csv_item "$tags_csv" "boundary"); fi
+    if [[ "$template_mode" == "knowledge-hybrid" ]]; then
+        tags_csv=$(append_csv_item "$tags_csv" "knowledge")
+        tags_csv=$(append_csv_item "$tags_csv" "hybrid")
+        tags_csv=$(append_csv_item "$tags_csv" "commands")
+    fi
 
     while IFS= read -r token; do
-        if printf '%s\n' "$token" | grep -Eq '^[a-z0-9]{4,}$' && ! printf '%s\n' "$token" | grep -Eq '^(use|when|with|from|that|this|your|have|will|then|than|where|which|covers|cover|focused|specific|situation|situations|apply|applies|local|safe|planning|skill|test|does)$'; then
+        if printf '%s\n' "$token" | grep -Eq '^[a-z0-9]{4,}$' && ! printf '%s\n' "$token" | grep -Eq '^(use|when|with|from|that|this|your|have|will|then|than|where|which|covers|cover|focused|specific|situation|situations|apply|applies|local|safe|planning|skill|test|does|knowledge|hybrid|command|commands)$'; then
             tags_csv=$(append_csv_item "$tags_csv" "$token")
         fi
     done < <(printf '%s\n' "$normalized" | tr '-' '\n')
 
-    tags_csv=$(printf '%s' "$tags_csv" | awk -F',' '{
-        count=0;
-        for (i=1; i<=NF; i++) {
-            if ($i != "" && count < 5) {
-                if (count > 0) printf ",";
-                printf "%s", $i;
-                count++;
-            }
-        }
-    }')
+    tags_csv=$(printf '%s' "$tags_csv" | awk -F',' '{count=0; for (i=1; i<=NF; i++) {if ($i != "" && count < 6) {if (count > 0) printf ","; printf "%s", $i; count++;}}}')
 
     if [[ -z "$tags_csv" ]]; then
         tags_csv=$(append_csv_item "$tags_csv" "$category")
@@ -274,12 +293,9 @@ build_topic_suggestions() {
     local boundary="$3"
     local description="$4"
     local skill_name="$5"
+    local template_mode="$6"
     local anchor_topics=()
     local fallback_topics=()
-    local combined semantic_text
-
-    combined="$skill_name $description $boundary"
-    semantic_text="$description $boundary"
 
     case "$category" in
         engineering) fallback_topics+=(software-engineering) ;;
@@ -302,11 +318,10 @@ build_topic_suggestions() {
         discipline) fallback_topics+=(operating-rules) ;;
     esac
 
-    if printf '%s' "$combined" | grep -Eqi '\bgit\b|\bcommit(s)?\b|\brepositor(y|ies)\b|\brepo\b|\bhistor(y|ies)\b'; then anchor_topics+=(version-control); fi
-    if printf '%s' "$semantic_text" | grep -Eqi '\bhygiene\b|\bcleanup\b|\bclean up\b'; then anchor_topics+=(code-hygiene); fi
-    if printf '%s' "$semantic_text" | grep -Eqi '\brepositor(y|ies)\b|\brepo\b|\bmaintenance\b|\bcleanup\b'; then anchor_topics+=(repository-maintenance); fi
-    if printf '%s' "$semantic_text" | grep -Eqi '\bsecurity\b'; then anchor_topics+=(security-practice); fi
-    if printf '%s' "$semantic_text" | grep -Eqi '\btest(ing)?\b|\bqa\b|\bquality\b'; then anchor_topics+=(quality-engineering); fi
+    if [[ "$template_mode" == "knowledge-hybrid" ]]; then
+        anchor_topics+=(knowledge-management)
+        anchor_topics+=(agent-workflows)
+    fi
 
     if [[ ${#anchor_topics[@]} -gt 0 ]]; then
         printf '%s\n' "${anchor_topics[@]}" | awk 'NF && !seen[$0]++' | awk 'NR<=4' | paste -sd ',' -
@@ -352,7 +367,6 @@ confirm_generated_list() {
 
 get_non_goals() {
     local first second
-
     echo -n "Enter one non-goal (optional, press Enter to skip): " >&2
     read -r first
     if [[ -z "$first" ]]; then
@@ -395,7 +409,6 @@ get_maturity() {
 
 get_skill_version() {
     local version
-
     while true; do
         echo -n "Enter skill version (default 0.1.0): " >&2
         read -r version
@@ -413,7 +426,6 @@ get_skill_version() {
 get_last_verified() {
     local default_date verified
     default_date=$(date +%F)
-
     while true; do
         echo -n "Enter last verified date (YYYY-MM-DD, default $default_date): " >&2
         read -r verified
@@ -428,12 +440,43 @@ get_last_verified() {
     done
 }
 
+get_command_namespace() {
+    local default_namespace="$1"
+    local namespace
+    while true; do
+        echo -n "Enter command namespace (default $default_namespace): " >&2
+        read -r namespace
+        namespace="${namespace:-$default_namespace}"
+
+        if validate_command_namespace "$namespace"; then
+            echo "$namespace"
+            return 0
+        fi
+    done
+}
+
+get_data_dir_contract() {
+    local default_contract="$1"
+    local contract
+    while true; do
+        echo -n "Enter data-dir contract (default $default_contract): " >&2
+        read -r contract
+        contract="${contract:-$default_contract}"
+
+        if validate_data_dir_contract "$contract"; then
+            echo "$contract"
+            return 0
+        fi
+    done
+}
+
 write_toml_array() {
     local file_path="$1"
     local key="$2"
     local values="$3"
     local delimiter="${4:-,}"
     local rendered=""
+    local item
 
     [[ -z "$values" ]] && return 0
 
@@ -442,13 +485,11 @@ write_toml_array() {
         item=$(printf '%s' "$item" | sed 's/^ *//; s/ *$//')
         [[ -z "$item" ]] && continue
         if [[ -n "$rendered" ]]; then
-            rendered+="\"$item\", "
-        else
-            rendered="\"$item\""
+            rendered+=", "
         fi
+        rendered+="\"$item\""
     done
 
-    rendered=$(printf '%s' "$rendered" | sed 's/, $//')
     [[ -n "$rendered" ]] && printf '%s = [%s]\n' "$key" "$rendered" >> "$file_path"
 }
 
@@ -457,6 +498,7 @@ write_yaml_list() {
     local key="$2"
     local values="$3"
     local delimiter="${4:-,}"
+    local item
 
     [[ -z "$values" ]] && return 0
 
@@ -468,23 +510,25 @@ write_yaml_list() {
     done
 }
 
-# Ask yes/no question
 ask_yes_no() {
     local question="$1"
     local default="${2:-n}"
-    
-    echo -n "$question [y/N]: "
+    local prompt
+    if [[ "$default" =~ ^[Yy]$ ]]; then
+        prompt="[Y/n]"
+    else
+        prompt="[y/N]"
+    fi
+    echo -n "$question $prompt: " >&2
     read -r answer
-    
     answer="${answer:-$default}"
     [[ "$answer" =~ ^[Yy]$ ]]
 }
 
-# Generate install script
 generate_install_script() {
     local project_name="$1"
     local skill_name="$2"
-    
+
     cat > "$SKILLS_DEV_DIR/$project_name/install.sh" << 'EOF'
 #!/bin/bash
 #
@@ -499,16 +543,19 @@ TARGET_DIR="$HOME/.config/opencode/skills/$SKILL_NAME"
 
 echo "Installing skill: $SKILL_NAME"
 
-# Create target directory
 mkdir -p "$TARGET_DIR"
-
-# Copy canonical skill files
 cp "$SCRIPT_DIR/SKILL.toml" "$TARGET_DIR/"
 cp "$SCRIPT_DIR/SKILL.md" "$TARGET_DIR/"
 
-# Copy any supporting files if they exist
-if [[ -d "$SCRIPT_DIR/supporting" ]]; then
-    cp -r "$SCRIPT_DIR/supporting/"* "$TARGET_DIR/" 2>/dev/null || true
+for dir_name in supporting commands scripts templates docs; do
+    if [[ -d "$SCRIPT_DIR/$dir_name" ]]; then
+        mkdir -p "$TARGET_DIR/$dir_name"
+        cp -R "$SCRIPT_DIR/$dir_name/." "$TARGET_DIR/$dir_name/"
+    fi
+done
+
+if [[ -d "$TARGET_DIR/scripts" ]]; then
+    find "$TARGET_DIR/scripts" -type f -name "*.sh" -exec chmod +x {} \;
 fi
 
 echo "✓ Skill installed to: $TARGET_DIR"
@@ -517,16 +564,14 @@ echo "To verify installation:"
 echo "  ls -la ~/.config/opencode/skills/$SKILL_NAME/"
 EOF
 
-    # Replace placeholder
     sed -i "s/SKILL_NAME_PLACEHOLDER/$skill_name/g" "$SKILLS_DEV_DIR/$project_name/install.sh"
     chmod +x "$SKILLS_DEV_DIR/$project_name/install.sh"
 }
 
-# Generate uninstall script
 generate_uninstall_script() {
     local project_name="$1"
     local skill_name="$2"
-    
+
     cat > "$SKILLS_DEV_DIR/$project_name/uninstall.sh" << 'EOF'
 #!/bin/bash
 #
@@ -548,7 +593,6 @@ rm -rf "$TARGET_DIR"
 echo "✓ Skill uninstalled from: $TARGET_DIR"
 EOF
 
-    # Replace placeholder
     sed -i "s/SKILL_NAME_PLACEHOLDER/$skill_name/g" "$SKILLS_DEV_DIR/$project_name/uninstall.sh"
     chmod +x "$SKILLS_DEV_DIR/$project_name/uninstall.sh"
 }
@@ -566,6 +610,9 @@ generate_skill_toml() {
     local maturity="${10}"
     local skill_version="${11}"
     local last_verified="${12}"
+    local template_mode="${13}"
+    local command_namespace="${14}"
+    local data_dir_contract="${15}"
 
     cat > "$project_dir/SKILL.toml" << EOF
 manifest_version = "$MANIFEST_VERSION"
@@ -594,9 +641,29 @@ license = "MIT"
 [compat]
 min_opencode_version = "0.1.0"
 EOF
+
+    if [[ "$template_mode" == "knowledge-hybrid" ]]; then
+        cat >> "$project_dir/SKILL.toml" << EOF
+
+[hybrid]
+enabled = true
+mode = "knowledge-hybrid"
+command_namespace = "$command_namespace"
+generated_commands = ["$command_namespace-save", "$command_namespace-search", "$command_namespace-load"]
+data_dir_contract = "$data_dir_contract"
+
+[knowledge]
+enabled = true
+storage_format = "markdown"
+data_dir = "$data_dir_contract"
+default_index = "index.md"
+templates_dir = "templates"
+commands_dir = "commands"
+scripts_dir = "scripts"
+EOF
+    fi
 }
 
-# Generate SKILL.md from template
 generate_skill_md() {
     local project_dir="$1"
     local skill_name="$2"
@@ -610,9 +677,11 @@ generate_skill_md() {
     local maturity="${10}"
     local skill_version="${11}"
     local last_verified="${12}"
-
-    # Capitalize skill name for title
+    local template_mode="${13}"
+    local command_namespace="${14}"
+    local data_dir_contract="${15}"
     local title_name
+
     title_name=$(echo "$skill_name" | sed 's/-/ /g' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) tolower(substr($i,2));}1')
 
     cat > "$project_dir/SKILL.md" << EOF
@@ -621,6 +690,7 @@ name: $skill_name
 description: $description
 version: $skill_version
 manifest_version: $MANIFEST_VERSION
+template_mode: $template_mode
 EOF
 
     write_yaml_list "$project_dir/SKILL.md" "tags" "$tags"
@@ -635,7 +705,7 @@ EOF
 ## Overview
 Brief description of what this skill provides and its core principle.
 
-> Canonical metadata lives in `SKILL.toml`. Keep this document focused on instructional content.
+> Canonical metadata lives in \`SKILL.toml\`. Keep this document focused on instructional content.
 
 ## When to Use
 - Specific situation 1
@@ -651,6 +721,7 @@ $boundary
 ## Metadata Snapshot
 - Type: $skill_type
 - Category: $category
+- Template Mode: $template_mode
 - Maturity: $maturity
 - Last Verified: $last_verified
 
@@ -660,7 +731,34 @@ $boundary
 
 EOF
 
-    # Add type-specific sections
+    if [[ "$template_mode" == "knowledge-hybrid" ]]; then
+        cat >> "$project_dir/SKILL.md" << EOF
+## Hybrid Contract
+
+This project is a knowledge-hybrid skill. In addition to the core skill instructions, it defines a small namespaced command surface and a knowledge storage contract.
+
+- Command Namespace: \`$command_namespace\`
+- Save Command: \`/$command_namespace-save\`
+- Search Command: \`/$command_namespace-search\`
+- Load Command: \`/$command_namespace-load\`
+- Data Directory Contract: \`$data_dir_contract\`
+
+The generated \`commands/\`, \`scripts/\`, and \`templates/\` directories are part of the public interface for this hybrid package.
+
+## Knowledge Workflow
+1. Save structured notes or artifacts into the contracted data directory.
+2. Search those notes by topic, keyword, or filename.
+3. Load the most relevant note back into the working context.
+4. Refine the templates and command docs to match the domain.
+
+## Hybrid Assets
+- \`commands/\` contains command-facing docs for save/search/load
+- \`scripts/\` contains helper shell entrypoints
+- \`templates/\` contains starter knowledge document templates
+
+EOF
+    fi
+
     case "$skill_type" in
         technique)
             cat >> "$project_dir/SKILL.md" << 'EOF'
@@ -672,9 +770,9 @@ EOF
 3. Third step description
 
 ### Example
-\`\`\`bash
+```bash
 # Example code showing the technique
-\`\`\`
+```
 
 EOF
             ;;
@@ -687,14 +785,14 @@ Description of how to think about this problem.
 
 ### Before/After Comparison
 **Before (problem):**
-\`\`\`bash
+```bash
 # Code showing the problem
-\`\`\`
+```
 
 **After (solution):**
-\`\`\`bash
+```bash
 # Code showing the solution
-\`\`\`
+```
 
 EOF
             ;;
@@ -709,9 +807,9 @@ EOF
 ## Common Operations
 
 ### Operation 1
-\`\`\`bash
+```bash
 # Code example
-\`\`\`
+```
 
 EOF
             ;;
@@ -737,7 +835,6 @@ EOF
             ;;
     esac
 
-    # Add common sections
     cat >> "$project_dir/SKILL.md" << 'EOF'
 ## Common Mistakes
 
@@ -754,9 +851,175 @@ EOF
 - Related skill 1
 - Related skill 2
 EOF
+
+    if [[ "$template_mode" == "knowledge-hybrid" ]]; then
+        cat >> "$project_dir/SKILL.md" << EOF
+
+## Hybrid Maintenance Notes
+- Keep command docs aligned with the helper scripts
+- Keep template examples compatible with the data-dir contract
+- Update both \`SKILL.toml\` and the generated docs if the namespace changes
+EOF
+    fi
 }
 
-# Generate README.md
+generate_hybrid_assets() {
+    local project_dir="$1"
+    local command_namespace="$2"
+    local data_dir_contract="$3"
+
+    mkdir -p "$project_dir/commands" "$project_dir/scripts" "$project_dir/templates"
+
+    cat > "$project_dir/templates/knowledge-entry.md" << EOF
+# Knowledge Entry Title
+
+- Namespace: $command_namespace
+- Created: YYYY-MM-DD
+- Source:
+- Tags:
+
+## Summary
+Short summary of the note or artifact.
+
+## Details
+Capture the important details here.
+
+## Related
+- Link related entries, tasks, or follow-up work.
+EOF
+
+    cat > "$project_dir/commands/${command_namespace}-save.md" << EOF
+# /$command_namespace-save
+
+Save a new knowledge artifact into the contracted data directory.
+
+## Purpose
+Use this command when you want to persist a durable note, decision, snippet, or research result for later retrieval.
+
+## Data Contract
+- Namespace: \`$command_namespace\`
+- Data Directory: \`$data_dir_contract\`
+- Default Template: \`templates/knowledge-entry.md\`
+
+## Script
+\`scripts/${command_namespace}-save.sh\`
+EOF
+
+    cat > "$project_dir/commands/${command_namespace}-search.md" << EOF
+# /$command_namespace-search
+
+Search previously saved knowledge artifacts within the contracted data directory.
+
+## Purpose
+Use this command when you need to find stored notes by keyword, filename, or topic before answering or implementing.
+
+## Data Contract
+- Namespace: \`$command_namespace\`
+- Data Directory: \`$data_dir_contract\`
+
+## Script
+\`scripts/${command_namespace}-search.sh\`
+EOF
+
+    cat > "$project_dir/commands/${command_namespace}-load.md" << EOF
+# /$command_namespace-load
+
+Load a specific knowledge artifact back into working context.
+
+## Purpose
+Use this command when you already know the note you want, or after search has identified the best match.
+
+## Data Contract
+- Namespace: \`$command_namespace\`
+- Data Directory: \`$data_dir_contract\`
+
+## Script
+\`scripts/${command_namespace}-load.sh\`
+EOF
+
+    cat > "$project_dir/scripts/${command_namespace}-save.sh" << 'EOF'
+#!/bin/bash
+set -e
+NAMESPACE="COMMAND_NAMESPACE_PLACEHOLDER"
+DATA_DIR_CONTRACT="DATA_DIR_CONTRACT_PLACEHOLDER"
+TITLE="${1:-untitled-note}"
+TARGET_ROOT="${OPENCODE_SKILL_DATA_DIR:-$DATA_DIR_CONTRACT}"
+SLUG=$(printf '%s' "$TITLE" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/-\{2,\}/-/g; s/^-//; s/-$//')
+TARGET_FILE="$TARGET_ROOT/${SLUG:-untitled-note}.md"
+mkdir -p "$TARGET_ROOT"
+if [[ -f "$TARGET_FILE" ]]; then
+    echo "Knowledge entry already exists: $TARGET_FILE"
+    exit 1
+fi
+if [[ -f "$(dirname "${BASH_SOURCE[0]}")/../templates/knowledge-entry.md" ]]; then
+    cp "$(dirname "${BASH_SOURCE[0]}")/../templates/knowledge-entry.md" "$TARGET_FILE"
+else
+    cat > "$TARGET_FILE" <<ENTRY
+# ${TITLE}
+
+## Summary
+
+## Details
+
+## Related
+ENTRY
+fi
+echo "Created knowledge entry for namespace '$NAMESPACE': $TARGET_FILE"
+EOF
+    sed -i "s/COMMAND_NAMESPACE_PLACEHOLDER/$command_namespace/g" "$project_dir/scripts/${command_namespace}-save.sh"
+    sed -i "s|DATA_DIR_CONTRACT_PLACEHOLDER|$data_dir_contract|g" "$project_dir/scripts/${command_namespace}-save.sh"
+    chmod +x "$project_dir/scripts/${command_namespace}-save.sh"
+
+    cat > "$project_dir/scripts/${command_namespace}-search.sh" << 'EOF'
+#!/bin/bash
+set -e
+DATA_DIR_CONTRACT="DATA_DIR_CONTRACT_PLACEHOLDER"
+QUERY="${1:-}"
+TARGET_ROOT="${OPENCODE_SKILL_DATA_DIR:-$DATA_DIR_CONTRACT}"
+if [[ -z "$QUERY" ]]; then
+    echo "Usage: $(basename "$0") <query>"
+    exit 1
+fi
+if [[ ! -d "$TARGET_ROOT" ]]; then
+    echo "Knowledge directory does not exist yet: $TARGET_ROOT"
+    exit 0
+fi
+grep -Rin --exclude-dir='.git' -- "$QUERY" "$TARGET_ROOT" || true
+EOF
+    sed -i "s|DATA_DIR_CONTRACT_PLACEHOLDER|$data_dir_contract|g" "$project_dir/scripts/${command_namespace}-search.sh"
+    chmod +x "$project_dir/scripts/${command_namespace}-search.sh"
+
+    cat > "$project_dir/scripts/${command_namespace}-load.sh" << 'EOF'
+#!/bin/bash
+set -e
+DATA_DIR_CONTRACT="DATA_DIR_CONTRACT_PLACEHOLDER"
+TARGET="${1:-}"
+TARGET_ROOT="${OPENCODE_SKILL_DATA_DIR:-$DATA_DIR_CONTRACT}"
+if [[ -z "$TARGET" ]]; then
+    echo "Usage: $(basename "$0") <file-or-relative-path>"
+    exit 1
+fi
+if [[ -f "$TARGET" ]]; then
+    cat "$TARGET"
+    exit 0
+fi
+if [[ -f "$TARGET_ROOT/$TARGET" ]]; then
+    cat "$TARGET_ROOT/$TARGET"
+    exit 0
+fi
+if [[ -f "$TARGET_ROOT/$TARGET.md" ]]; then
+    cat "$TARGET_ROOT/$TARGET.md"
+    exit 0
+fi
+echo "Knowledge entry not found: $TARGET"
+exit 1
+EOF
+    sed -i "s|DATA_DIR_CONTRACT_PLACEHOLDER|$data_dir_contract|g" "$project_dir/scripts/${command_namespace}-load.sh"
+    chmod +x "$project_dir/scripts/${command_namespace}-load.sh"
+
+    print_success "Created hybrid commands, scripts, and templates"
+}
+
 generate_readme() {
     local project_dir="$1"
     local project_name="$2"
@@ -766,6 +1029,9 @@ generate_readme() {
     local category="$6"
     local boundary="$7"
     local maturity="$8"
+    local template_mode="$9"
+    local command_namespace="${10}"
+    local data_dir_contract="${11}"
 
     cat > "$project_dir/README.md" << EOF
 # $project_name
@@ -777,6 +1043,7 @@ $description
 - **Type:** $skill_type
 - **Category:** $category
 - **Boundary:** $boundary
+- **Template Mode:** $template_mode
 - **Maturity:** $maturity
 
 ## Installation
@@ -804,54 +1071,86 @@ $project_name/
 ├── install.sh            # Installation script
 ├── uninstall.sh          # Uninstallation script
 ├── README.md             # This file
+EOF
+
+    if [[ "$template_mode" == "knowledge-hybrid" ]]; then
+        cat >> "$project_dir/README.md" << EOF
+├── commands/             # Namespaced save/search/load command docs
+├── scripts/              # Helper shell scripts for hybrid workflow
+├── templates/            # Starter knowledge-entry templates
+EOF
+    fi
+
+    cat >> "$project_dir/README.md" << 'EOF'
 └── .git/                 # Version control
-\`\`\`
+```
 
 ## Development
 
 This skill follows the OpenCode skill development pattern:
 - Source files are managed in this repository
-- \`SKILL.toml\` is the canonical metadata source
-- \`SKILL.md\` contains the human/agent-readable instructions
-- Supporting files can be included in a \`supporting/\` directory
+- `SKILL.toml` is the canonical metadata source
+- `SKILL.md` contains the human/agent-readable instructions
+- Supporting files can be included in optional package directories
 
+EOF
+
+    if [[ "$template_mode" == "knowledge-hybrid" ]]; then
+        cat >> "$project_dir/README.md" << EOF
+## Hybrid Mode
+
+This project was generated in **knowledge-hybrid** mode.
+
+### Hybrid Contract
+- **Command Namespace:** \`$command_namespace\`
+- **Commands:** \`/$command_namespace-save\`, \`/$command_namespace-search\`, \`/$command_namespace-load\`
+- **Data Directory Contract:** \`$data_dir_contract\`
+
+### Generated Hybrid Assets
+- \`commands/${command_namespace}-save.md\`
+- \`commands/${command_namespace}-search.md\`
+- \`commands/${command_namespace}-load.md\`
+- \`scripts/${command_namespace}-save.sh\`
+- \`scripts/${command_namespace}-search.sh\`
+- \`scripts/${command_namespace}-load.sh\`
+- \`templates/knowledge-entry.md\`
+
+The generated install script will copy \`commands/\`, \`scripts/\`, \`templates/\`, and \`docs/\` when those directories are present.
+
+EOF
+    fi
+
+    cat >> "$project_dir/README.md" << 'EOF'
 ## License
 
 MIT
 EOF
 }
 
-# Initialize git repository
 init_git() {
     local project_dir="$1"
     local skill_name="$2"
-    
     cd "$project_dir"
     git init
     git add .
     git commit -m "Initial commit: $skill_name skill"
-    
     print_success "Git repository initialized"
 }
 
-# Main function
 main() {
     print_header "OpenCode Skill Creator"
-    
-    # Check if skills dev directory exists
+
     if [[ ! -d "$SKILLS_DEV_DIR" ]]; then
         echo "Creating skills development directory: $SKILLS_DEV_DIR"
         mkdir -p "$SKILLS_DEV_DIR"
     fi
-    
-    # Get skill information
+
     local skill_name
     skill_name=$(get_skill_name "$1") || exit 1
-    
+
     local project_name="${SKILL_PREFIX}${skill_name}"
     local project_dir="$SKILLS_DEV_DIR/$project_name"
-    
-    # Check if project already exists
+
     if [[ -d "$project_dir" ]]; then
         print_error "Project already exists: $project_dir"
         if ! ask_yes_no "Overwrite existing project?"; then
@@ -860,11 +1159,13 @@ main() {
         fi
         rm -rf "$project_dir"
     fi
-    
-    # Get more information
+
     local description
     description=$(get_description)
-    
+
+    local template_mode
+    template_mode=$(get_template_mode)
+
     local skill_type
     skill_type=$(get_skill_type)
 
@@ -875,10 +1176,10 @@ main() {
     boundary=$(get_boundary)
 
     local tags
-    tags=$(confirm_generated_list "Tags" "$(build_tag_suggestions "$skill_name" "$category" "$description" "$boundary")")
+    tags=$(confirm_generated_list "Tags" "$(build_tag_suggestions "$skill_name" "$category" "$description" "$boundary" "$template_mode")")
 
     local topics
-    topics=$(confirm_generated_list "Topics" "$(build_topic_suggestions "$category" "$skill_type" "$boundary" "$description" "$skill_name")")
+    topics=$(confirm_generated_list "Topics" "$(build_topic_suggestions "$category" "$skill_type" "$boundary" "$description" "$skill_name" "$template_mode")")
 
     local non_goals
     non_goals=$(get_non_goals)
@@ -891,52 +1192,65 @@ main() {
 
     local last_verified
     last_verified=$(get_last_verified)
-    
-    # Create project directory
+
+    local command_namespace=""
+    local data_dir_contract=""
+    if [[ "$template_mode" == "knowledge-hybrid" ]]; then
+        command_namespace=$(get_command_namespace "$skill_name")
+        data_dir_contract=$(get_data_dir_contract "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/$command_namespace")
+    fi
+
     print_header "Creating Project: $project_name"
     mkdir -p "$project_dir"
-    
-    # Generate files
     echo "Generating files..."
-    
-    generate_skill_toml "$project_dir" "$skill_name" "$description" "$skill_type" "$category" "$boundary" "$tags" "$topics" "$non_goals" "$maturity" "$skill_version" "$last_verified"
+
+    generate_skill_toml "$project_dir" "$skill_name" "$description" "$skill_type" "$category" "$boundary" "$tags" "$topics" "$non_goals" "$maturity" "$skill_version" "$last_verified" "$template_mode" "$command_namespace" "$data_dir_contract"
     print_success "Created SKILL.toml"
 
-    generate_skill_md "$project_dir" "$skill_name" "$description" "$skill_type" "$category" "$boundary" "$tags" "$topics" "$non_goals" "$maturity" "$skill_version" "$last_verified"
+    generate_skill_md "$project_dir" "$skill_name" "$description" "$skill_type" "$category" "$boundary" "$tags" "$topics" "$non_goals" "$maturity" "$skill_version" "$last_verified" "$template_mode" "$command_namespace" "$data_dir_contract"
     print_success "Created SKILL.md"
-    
+
+    if [[ "$template_mode" == "knowledge-hybrid" ]]; then
+        generate_hybrid_assets "$project_dir" "$command_namespace" "$data_dir_contract"
+    fi
+
     generate_install_script "$project_name" "$skill_name"
     print_success "Created install.sh"
-    
+
     generate_uninstall_script "$project_name" "$skill_name"
     print_success "Created uninstall.sh"
-    
-    generate_readme "$project_dir" "$project_name" "$skill_name" "$description" "$skill_type" "$category" "$boundary" "$maturity"
+
+    generate_readme "$project_dir" "$project_name" "$skill_name" "$description" "$skill_type" "$category" "$boundary" "$maturity" "$template_mode" "$command_namespace" "$data_dir_contract"
     print_success "Created README.md"
-    
-    # Initialize git if requested
+
     if ask_yes_no "Initialize git repository?" "y"; then
         init_git "$project_dir" "$skill_name"
     fi
-    
-    # Summary
+
     print_header "Project Created Successfully!"
     echo "Location: $project_dir"
     echo ""
     echo "Next steps:"
     echo "  1. cd $project_dir"
     echo "  2. Review SKILL.toml metadata and edit SKILL.md with your content"
-    echo "  3. Run ./install.sh to install the skill"
+    if [[ "$template_mode" == "knowledge-hybrid" ]]; then
+        echo "  3. Review commands/, scripts/, and templates/ for your hybrid workflow"
+        echo "  4. Run ./install.sh to install the hybrid package"
+        echo ""
+        echo "Hybrid contract:"
+        echo "  - Namespace: $command_namespace"
+        echo "  - Data directory: $data_dir_contract"
+    else
+        echo "  3. Run ./install.sh to install the skill"
+    fi
     echo ""
     echo "To install the skill:"
     echo "  cd $project_dir && ./install.sh"
     echo ""
-    
-    # Open in editor if possible
+
     if command -v code &> /dev/null && ask_yes_no "Open in VS Code?" "n"; then
         code "$project_dir"
     fi
 }
 
-# Run main function
 main "$@"

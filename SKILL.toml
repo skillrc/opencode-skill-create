@@ -1,0 +1,21 @@
+manifest_version = "1.0"
+
+[skill]
+name = "create-skill"
+version = "0.2.0"
+description = "Use when creating OpenCode skill-only or knowledge-hybrid packages with manifest-first metadata and installable runtime assets"
+type = "workflow"
+category = "workflow"
+boundary = "Focused on scaffolding OpenCode packages, especially skill-only and knowledge-hybrid structures"
+maturity = "alpha"
+last_verified = "2026-03-15"
+tags = ["scaffolding", "skills", "hybrid", "knowledge", "workflow"]
+topics = ["opencode-packaging", "knowledge-management", "agent-workflows"]
+non_goals = ["Managing installed skills", "Serving as a package registry"]
+
+[source]
+repository = "https://github.com/your-org/opencode-skill-create"
+license = "MIT"
+
+[compat]
+min_opencode_version = "0.1.0"

@@ -1,18 +1,18 @@
 ---
 name: create-skill
-description: Use when creating a new OpenCode skill project with proper structure, install/uninstall scripts, and version control support
+description: Use when creating a new OpenCode skill-only or knowledge-hybrid package with proper structure, install/uninstall scripts, and version control support
 ---
 
 # Create Skill
 
 ## Overview
 
-Interactive wizard for creating new OpenCode skills with proper project structure and structured metadata. Separates development (~/Project/Skills) from deployment (~/.config/opencode/skills) to enable version control, discoverability, and independent management.
+Interactive wizard for creating new OpenCode packages with proper project structure and structured metadata. It now supports both classic skill-only projects and first-stage knowledge-hybrid projects. It separates development (~/Project/Skills) from deployment (~/.config/opencode/skills) to enable version control, discoverability, and independent management.
 
 ## When to Use
 
 - Creating a new OpenCode skill for the first time
-- Want a standardized skill project structure with install/uninstall scripts
+- Want a standardized skill-only or knowledge-hybrid project structure
 - Need structured metadata for category, tags, boundary, and maturity
 - Need version control support for skills
 - Following the "development-deployment separation" pattern
@@ -38,18 +38,27 @@ opencode-create-skill
 opencode-create-skill git-workflow
 ```
 
-## Project Structure Created
+## Project Structures Created
 
 ```
 opencode-skill-{name}/
 ├── SKILL.toml            # Canonical machine-readable manifest
 ├── SKILL.md              # Main skill instructions (installed to ~/.config/opencode/skills/)
-├── create-skill.sh       # This script (available as opencode-create-skill command)
 ├── install.sh            # Installs skill package files to ~/.config/opencode/skills/
 ├── uninstall.sh          # Removes skill from ~/.config/opencode/skills/
 ├── README.md             # Project documentation (not installed)
 └── .git/                 # Version control
 ```
+
+When `knowledge-hybrid` mode is selected, the wizard also generates:
+
+```text
+commands/
+scripts/
+templates/
+```
+
+These directories establish a first-stage contract for namespaced `save/search/load` workflow entrypoints plus a starter knowledge template.
 
 ## Skill Naming Rules
 
@@ -129,10 +138,25 @@ Default is `$HOME/Project/Skills` if not set.
 
 The generated `install.sh`:
 1. Creates `~/.config/opencode/skills/{skill-name}/`
-2. Copies `SKILL.md` into it
-3. Copies any supporting files (if `supporting/` directory exists)
+2. Copies `SKILL.toml` and `SKILL.md`
+3. Copies optional runtime directories when present (`supporting/`, `commands/`, `scripts/`, `templates/`, `docs/`)
 
-**Only SKILL.md is installed** — project files stay in the development directory.
+Mutable knowledge data should still live outside the installed runtime package.
+
+## Hybrid Manifest and Data Contract
+
+For `knowledge-hybrid` projects, the generator writes:
+
+- `[hybrid]` metadata for namespace and generated commands
+- `[knowledge]` metadata for storage format and path contract
+
+The default data-dir contract is designed to be package-manager friendly:
+
+```bash
+${XDG_DATA_HOME:-$HOME/.local/share}/opencode/<namespace>
+```
+
+This keeps runtime package files deployable while allowing knowledge entries to remain mutable in a user data directory.
 
 ## Workflow
 

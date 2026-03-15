@@ -12,17 +12,20 @@ TARGET_DIR="$HOME/.config/opencode/skills/$SKILL_NAME"
 echo "Installing skill: $SKILL_NAME"
 echo ""
 
-# Create target directory
 mkdir -p "$TARGET_DIR"
 
-# Copy SKILL.md
+cp "$SCRIPT_DIR/SKILL.toml" "$TARGET_DIR/"
 cp "$SCRIPT_DIR/SKILL.md" "$TARGET_DIR/"
-
-# Copy create-skill.sh script
 cp "$SCRIPT_DIR/create-skill.sh" "$TARGET_DIR/"
 chmod +x "$TARGET_DIR/create-skill.sh"
 
-# Create symlink for easy access
+for dir_name in templates docs; do
+    if [[ -d "$SCRIPT_DIR/$dir_name" ]]; then
+        mkdir -p "$TARGET_DIR/$dir_name"
+        cp -R "$SCRIPT_DIR/$dir_name/." "$TARGET_DIR/$dir_name/"
+    fi
+done
+
 BIN_DIR="$HOME/.local/bin"
 if [[ -d "$BIN_DIR" ]]; then
     ln -sf "$TARGET_DIR/create-skill.sh" "$BIN_DIR/opencode-create-skill"

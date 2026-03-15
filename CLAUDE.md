@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This is a tool for creating OpenCode skills. It provides an interactive wizard that generates new skill projects with a manifest-first package structure, install/uninstall scripts, and optional git initialization.
+This is a tool for creating OpenCode skill packages. It provides an interactive wizard that generates either classic skill-only projects or first-stage knowledge-hybrid projects with a manifest-first package structure, install/uninstall scripts, and optional git initialization.
 
 ## Architecture
 
@@ -19,25 +19,34 @@ Canonical metadata now lives in `SKILL.toml`, while `SKILL.md` is the human/agen
 
 ### Key Components
 
-- `create-skill.sh` - Main wizard script. Prompts for metadata, validates inputs, generates files. Symlinked to `~/.local/bin/opencode-create-skill`
+- `create-skill.sh` - Main wizard script. Prompts for metadata, validates inputs, generates files for skill-only or knowledge-hybrid templates. Symlinked to `~/.local/bin/opencode-create-skill`
 - `SKILL.toml` - Canonical machine-readable manifest used by package-manager tooling
 - `SKILL.md` - Human/agent-readable instruction document with a lightweight compatibility header
 - `install.sh` / `uninstall.sh` - Deploy/remove the skill from `~/.config/opencode/skills/`
 
 ### Generated Project Structure
 
-Each created skill follows this structure:
+Each created skill follows this structure at minimum:
 
 ```
 opencode-skill-{name}/
 ├── SKILL.toml            # Canonical machine-readable manifest
 ├── SKILL.md              # Core skill instructions (installed to ~/.config/opencode/skills/)
-├── create-skill.sh       # The wizard script itself (installed as command)
 ├── install.sh            # Deploys skill package files to ~/.config/opencode/skills/
 ├── uninstall.sh          # Removes skill from ~/.config/opencode/skills/
 ├── README.md             # Project documentation (not installed)
 └── .git/                 # Version control
 ```
+
+Knowledge-hybrid packages additionally include:
+
+```text
+commands/
+scripts/
+templates/
+```
+
+These establish a workflow-entry surface (`save/search/load`) plus deterministic helpers and starter document templates.
 
 ## Commands
 
@@ -64,7 +73,7 @@ opencode-create-skill <skill-name>
 
 ## Skill Manifest Schema
 
-Generated skills include canonical metadata in `SKILL.toml` with this structure:
+Generated packages include canonical metadata in `SKILL.toml` with this structure:
 
 ```toml
 manifest_version = "1.0"
@@ -90,6 +99,25 @@ non_goals = ["out-of-scope item"]
 - **reference** - API docs, syntax guides
 - **discipline** - Rules/requirements to enforce
 
+### Hybrid Metadata
+
+When the `knowledge-hybrid` template mode is selected, generated manifests also include:
+
+- `[hybrid].enabled`
+- `[hybrid].mode`
+- `[hybrid].command_namespace`
+- `[hybrid].generated_commands`
+- `[hybrid].data_dir_contract`
+- `[knowledge].enabled`
+- `[knowledge].storage_format`
+- `[knowledge].data_dir`
+- `[knowledge].default_index`
+- `[knowledge].templates_dir`
+- `[knowledge].commands_dir`
+- `[knowledge].scripts_dir`
+
+This is intended to align future generated packages with package-manager-aware tooling.
+
 ## Environment Variables
 
 ```bash
@@ -108,7 +136,7 @@ Skill names must match: `^[a-z0-9]+(-[a-z0-9]+)*$`
 
 ## File Generation Logic
 
-The wizard (`create-skill.sh`) generates different SKILL.md content based on skill type:
+The wizard (`create-skill.sh`) generates different SKILL.md content based on skill type and template mode:
 
 - **technique**: "Core Technique" section with numbered steps and example
 - **pattern**: "The Pattern" section with Before/After comparison
@@ -117,9 +145,17 @@ The wizard (`create-skill.sh`) generates different SKILL.md content based on ski
 
 All types include: Overview, When to Use, Boundary, Non-Goals, Common Mistakes, See Also.
 
+Knowledge-hybrid mode additionally generates:
+
+- command docs for namespaced `save/search/load`
+- helper scripts for those commands
+- a starter `templates/knowledge-entry.md`
+- hybrid contract documentation in both `SKILL.md` and `README.md`
+
 ## Important Notes
 
 - The wizard auto-suggests `tags` and `topics` based on skill name, category, description, and boundary. Authors can accept or override.
 - The `description` field should start with "Use when" for OpenCode/tooling discovery.
 - Git initialization is optional but recommended (wizard prompts for it).
-- The install script copies both `SKILL.toml` and `SKILL.md`, plus a `supporting/` directory if it exists.
+- The install script copies both `SKILL.toml` and `SKILL.md`, plus optional runtime directories when they exist (`supporting/`, `commands/`, `scripts/`, `templates/`, `docs/`).
+- Hybrid packages should treat installed runtime assets as deployable artifacts, while mutable knowledge data should live outside the installed package path.
